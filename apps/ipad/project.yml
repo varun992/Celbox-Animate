@@ -1,0 +1,64 @@
+# XcodeGen spec for the Celbox iPad app.
+#   brew install xcodegen
+#   cd apps/ipad && xcodegen generate && open Celbox.xcodeproj
+name: Celbox
+options:
+  bundleIdPrefix: com.illuminartstudios
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""            # set your team in Xcode > Signing & Capabilities
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CLANG_CXX_LANGUAGE_STANDARD: "c++20"
+    CLANG_CXX_LIBRARY: "libc++"
+    GCC_WARN_INHIBIT_ALL_WARNINGS: NO
+targets:
+  Celbox:
+    type: application
+    platform: iOS
+    sources:
+      - path: Celbox
+      - path: ../../core/src
+        group: Core (C++)
+      - path: ../../core/include
+        group: Core (C++)
+        buildPhase: none
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.illuminartstudios.celbox
+        PRODUCT_NAME: Celbox
+        TARGETED_DEVICE_FAMILY: "2"           # iPad (Mac later via its own target)
+        SUPPORTS_MACCATALYST: NO
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../core/include"
+        SWIFT_OBJC_BRIDGING_HEADER: "Celbox/Core/Celbox-Bridging-Header.h"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_FILE: Celbox/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+  CelboxCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: CelboxTests
+    dependencies:
+      - target: Celbox
+    settings:
+      base:
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Celbox.app/Celbox"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        SWIFT_OBJC_BRIDGING_HEADER: "Celbox/Core/Celbox-Bridging-Header.h"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../core/include"
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Celbox:
+    build:
+      targets:
+        Celbox: all
+        CelboxCoreTests: [test]
+    test:
+      targets:
+        - CelboxCoreTests

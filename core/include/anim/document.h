@@ -2,6 +2,8 @@
 // timeline + cameras + audio. This is the single source of truth that every
 // platform shell (iPad, Mac, Windows) renders and edits.
 #pragma once
+#include <algorithm>
+#include <array>
 #include <deque>
 #include <map>
 #include <string>

@@ -1,5 +1,7 @@
 #include "anim/ops.h"
 
+#include <algorithm>
+
 namespace anim::ops {
 namespace {
 bool isDrawingLayer(const Layer& l) { return l.kind == LayerKind::Vector || l.kind == LayerKind::Raster; }

@@ -1,5 +1,7 @@
 #include "anim/evaluate.h"
 
+#include <algorithm>
+
 #include "anim/ops.h"
 
 namespace anim {
