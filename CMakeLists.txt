@@ -7,13 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(animcore STATIC
     core/src/ai.cpp
     core/src/brush.cpp
+    core/src/celbox_c.cpp
     core/src/document.cpp
     core/src/drawing.cpp
     core/src/easing.cpp
     core/src/edit.cpp
     core/src/evaluate.cpp
     core/src/layer.cpp
+    core/src/json.cpp
     core/src/ops.cpp
+    core/src/serialize.cpp
+    core/src/session.cpp
+    core/src/tessellate.cpp
 )
 target_include_directories(animcore PUBLIC core/include)
 if(MSVC)

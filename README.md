@@ -6,6 +6,7 @@ This repository holds `animcore`, the platform-independent C++20 core shared by 
 
 - [docs/FEATURES.md](docs/FEATURES.md): prioritized feature list mapped to the 8 requirements, with what already exists
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture and the reasons behind it
+- [apps/ipad](apps/ipad/README.md): the iPad app (SwiftUI + Metal). See there for how to run it in Xcode.
 
 ## Build and test
 
@@ -25,8 +26,8 @@ Add `core/include` to the Xcode target's header search paths, enable **C++ and O
 
 | # | Milestone | Outcome |
 |---|---|---|
-| M0 | **Core skeleton (this)** | Model, timeline ops, symbols, tweens, camera, effects params, lip sync, AI hook, undo, 19 tests |
-| M1 | Persistence + iPad shell v0 | `.anim` save/load + autosave; SwiftUI app with document browser, canvas (Metal) and horizontal timeline; Pencil vector drawing with stabilizer; playback |
+| M0 | Core skeleton ✅ | Model, timeline ops, symbols, tweens, camera, effects params, lip sync, AI hook, undo |
+| M1 | Persistence + iPad shell v0 ✅ | `.celbox` save/load + autosave; SwiftUI app with document browser, canvas (Metal) and horizontal timeline; Pencil vector drawing with stabilizer; playback |
 | M2 | Drawing tools | Raster GPU brushes, eraser, paint bucket with gap close, lasso UI, transforms, rulers/symmetry UI, onion skin |
 | M3 | Animation depth | Symbol library and edit-in-place, tween UI and graph editor, animation folders UI, camera tool, effects on GPU (blur/glow/shadow) |
 | M4 | Audio + export | Audio import/record, waveform, scrub, lip sync editor + on-device phoneme analyzer, MP4/GIF/PNG/ProRes export with audio |

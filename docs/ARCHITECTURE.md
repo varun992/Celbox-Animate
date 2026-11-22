@@ -30,6 +30,8 @@ Why C++ rather than Rust or a cross-platform UI framework:
 - **The graphics ecosystem is C++.** Skia, OpenColorIO, FFmpeg, USD and glTF loaders, and Core ML / DirectML runtimes all have first-class C++ APIs. The 3D/Blender milestone (USD, glTF) is much easier from C++.
 - **Native UI per platform.** iPad users expect Pencil hover, the Apple Pencil Pro squeeze, and iPadOS gestures. Flutter, React Native and Qt Quick can't match native Pencil latency and feel. Keeping the UI thin and native, and everything else shared, is the usual setup for pro creative apps.
 
+**Shell boundary (M1):** the shells call the core through a small C API (`core/include/celbox_c.h`) built around an editor `Session`. A flat C surface is the most stable thing to bind from Swift (bridging header, no interop flags), from C++/WinRT on Windows, and from C# or Kotlin if needed later. Swift's direct C++ interop is still available when a shell needs deeper access.
+
 Trade-off accepted: C++ needs discipline for memory safety. We limit it with value types, ids instead of pointers across the model, sanitizer CI builds and no raw ownership.
 
 ## Core design rules
@@ -59,6 +61,10 @@ Trade-off accepted: C++ needs discipline for memory safety. We limit it with val
 | `assist.h` | Grid, line/ellipse/perspective rulers, symmetry |
 | `audio.h` | Audio assets/clips, phonemes, mouth chart, analyzer interface |
 | `ai.h/.cpp` | In-between request/payload/provider contract, entitlement gate, geometric fallback |
+| `json.h/.cpp`, `serialize.h/.cpp` | Dependency-free JSON, `.celbox` package save/load |
+| `tessellate.h/.cpp` | Strokes/fills/onion skin/camera frame → GPU triangles (shared by all renderers) |
+| `session.h/.cpp` | Editor session: current layer/frame/tool/color, timeline verbs, strokes, undo for every edit |
+| `celbox_c.h`, `celbox_c.cpp` | C API used by the platform shells |
 
 ## Rendering plan (next)
 
@@ -68,9 +74,9 @@ Trade-off accepted: C++ needs discipline for memory safety. We limit it with val
 - Effects are implemented per backend from the same `EffectParams` (separable Gaussian, glow = blur + add, etc.), with golden-image tests shared across backends.
 - Playback cache: evaluate and render frames ahead on a background queue, invalidated by transaction-touched layers.
 
-## Persistence plan (M1)
+## Persistence (M1, implemented in `serialize.h`)
 
-`.anim` package (a directory, or a zip for sharing): `document.json` (model, versioned schema), `drawings/<id>.vec` (compact binary), `tiles/<drawing>/<tx>_<ty>.png` or zstd-compressed raw, `audio/*`, `thumbs/`. Autosave writes only changed drawings/tiles. A schema version field plus migration functions keep old files opening.
+`.celbox` package (a directory, or a zip for sharing): `document.json` (model, versioned schema), `drawings/<id>.json` (vector), `drawings/<id>.raster` (tiles), later `audio/*` and `thumbs/`. A schema version field plus migration functions keep old files opening, and files from a newer version are refused instead of half-loaded. Next steps: write only changed drawings on autosave, compress tiles with zstd, and use a compact binary vector format.
 
 ## AI in-betweening (paid) plan
 

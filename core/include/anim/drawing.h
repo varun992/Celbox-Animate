@@ -68,6 +68,11 @@ public:
         return *slot;
     }
     size_t tileCount() const { return tiles_.size(); }
+    template <class Fn>  // fn(tx, ty, const RasterTile&)
+    void forEachTile(Fn fn) const {
+        for (const auto& [k, t] : tiles_) fn(int(int32_t(k >> 32)), int(int32_t(k & 0xffffffffu)), *t);
+    }
+    void putTile(int tx, int ty, std::shared_ptr<RasterTile> t) { tiles_[key(tx, ty)] = std::move(t); }
     bool sharesTileWith(const RasterDrawing& o, int tx, int ty) const {
         auto a = tiles_.find(key(tx, ty)); auto b = o.tiles_.find(key(tx, ty));
         return a != tiles_.end() && b != o.tiles_.end() && a->second == b->second;

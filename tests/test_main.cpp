@@ -11,6 +11,12 @@
 #include "anim/edit.h"
 #include "anim/evaluate.h"
 #include "anim/ops.h"
+#include "anim/json.h"
+#include "anim/serialize.h"
+#include "anim/session.h"
+#include "anim/tessellate.h"
+#include "celbox_c.h"
+#include <filesystem>
 
 using namespace anim;
 
@@ -403,6 +409,224 @@ TEST(layer_reparent_into_folder) {
     CHECK(doc.timeline.move(l->id, f->id));
     CHECK(doc.timeline.parentOf(l->id) == f);
     CHECK(!doc.timeline.move(f->id, l->id));  // cannot move into non-folder / cycle
+}
+
+TEST(json_roundtrip) {
+    json::Value v(json::Object{{"a", 1}, {"b", json::Array{1.5, "x\"y\n", true, nullptr}}, {"c", json::Object{}}});
+    auto text = json::write(v);
+    auto back = json::parse(text);
+    CHECK(back.has_value());
+    CHECK((*back)["a"].i() == 1);
+    NEAR((*back)["b"].arr()[0].num(), 1.5);
+    CHECK((*back)["b"].arr()[1].str() == "x\"y\n");
+    CHECK((*back)["b"].arr()[2].b());
+    CHECK(!json::parse("{\"a\":").has_value());
+    CHECK(json::parse("{\"u\":\"\\u00e9\"}")->operator[]("u").str() == "\xc3\xa9");
+}
+
+static Document makeRichDocument() {
+    Document doc;
+    doc.canvas.width = 5000; doc.movie.fps = 30;
+    StyleId ink = doc.palette.add(doc.ids, "Ink", {0.1f, 0.2f, 0.3f, 1});
+    Layer* folder = doc.addLayer(LayerKind::Folder, "Char");
+    folder->transform.position.setKey(0, {1, 2}, Easing::easeInOut());
+    folder->transform.position.setKey(10, {100, 2});
+    Effect blur; blur.radius.setKey(0, 2.0f); blur.radius.setKey(5, 8.0f);
+    folder->effects.push_back(blur);
+    Layer* v = doc.addLayer(LayerKind::Vector, "Ink", folder->id);
+    DrawingId d = ops::insertBlankKeyframe(doc, *v, 0);
+    *doc.drawings.get(d)->vector() = line({0, 0}, {10, 5}, ink, doc.ids.make<ObjectId>());
+    ops::insertFrames(*v, 0, 3);
+    ops::linkedDuplicate(*v, 0, 6);
+    Layer* r = doc.addLayer(LayerKind::Raster, "Paint");
+    DrawingId rd = ops::insertBlankKeyframe(doc, *r, 0);
+    doc.drawings.get(rd)->raster()->tileForWrite(2, -1).rgba[5] = 77;
+    SymbolDef& sym = doc.createSymbol("Blink", SymbolKind::MovieClip);
+    Layer* sl = sym.timeline.addLayer(doc.ids, LayerKind::Vector, "eye");
+    ops::insertBlankKeyframe(doc, *sl, 0);
+    Layer* inst = doc.addLayer(LayerKind::Symbol, "BlinkInst");
+    Keyframe k; k.instance = SymbolInstance{sym.id, LoopMode::PlayOnce, 2}; k.label = "start";
+    inst->exposure.setKey(0, k);
+    doc.cameras.front().zoom.setKey(0, 1.0f); doc.cameras.front().zoom.setKey(20, 2.0f);
+    return doc;
+}
+
+TEST(package_roundtrip) {
+    Document doc = makeRichDocument();
+    io::Package pkg = io::save(doc);
+    CHECK(pkg.count("document.json") == 1);
+    Document back;
+    std::string err;
+    CHECK(io::load(pkg, back, &err));
+    CHECK(err.empty());
+    CHECK(back.canvas.width == 5000);
+    NEAR(back.movie.fps, 30);
+    CHECK(back.palette.styles().size() == 1);
+    CHECK(back.symbols.size() == 1);
+    CHECK(back.symbols.begin()->second.kind == SymbolKind::MovieClip);
+    CHECK(back.drawings.size() == doc.drawings.size());
+    // Same picture at several frames.
+    EvalOptions o;
+    for (int f : {0, 3, 5, 6, 9}) {
+        auto a = evaluateFrame(doc, f, o), b = evaluateFrame(back, f, o);
+        CHECK(a.cmds.size() == b.cmds.size());
+        for (size_t i = 0; i < a.cmds.size() && i < b.cmds.size(); ++i) {
+            CHECK(a.cmds[i].drawing == b.cmds[i].drawing);
+            CHECK(a.cmds[i].transform.approxEqual(b.cmds[i].transform));
+        }
+    }
+    // Saving again is stable.
+    CHECK(io::save(back) == pkg);
+    // New ids never collide with loaded ones.
+    CHECK(back.ids.peek() >= doc.ids.peek());
+
+    // Directory form.
+    const std::string dir = (std::filesystem::temp_directory_path() / "celbox_test_pkg").string();
+    std::filesystem::remove_all(dir);
+    CHECK(io::writeDirectory(pkg, dir));
+    io::Package fromDisk;
+    CHECK(io::readDirectory(dir, fromDisk));
+    CHECK(fromDisk == pkg);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(package_rejects_bad_input) {
+    Document d;
+    std::string err;
+    CHECK(!io::load({}, d, &err) && !err.empty());
+    io::Package p{{"document.json", {'{', '}'}}};
+    CHECK(!io::load(p, d, &err));
+    std::string newer = "{\"format\":\"celbox\",\"version\":999}";
+    p["document.json"] = io::Bytes(newer.begin(), newer.end());
+    CHECK(!io::load(p, d, &err));
+}
+
+TEST(tessellation) {
+    Document doc;
+    Layer* l = doc.addLayer(LayerKind::Vector, "Ink");
+    DrawingId d = ops::insertBlankKeyframe(doc, *l, 0);
+    *doc.drawings.get(d)->vector() = line({100, 100}, {200, 100});
+    ops::insertBlankKeyframe(doc, *l, 1);
+    gfx::TessellateOptions opt;
+    std::vector<gfx::Vertex> v;
+    opt.drawCameraFrame = false;
+    gfx::tessellateFrame(doc, 0, opt, v);
+    CHECK(v.size() % 3 == 0 && v.size() > 6);
+    float minX = 1e9f, maxX = -1e9f;
+    for (size_t i = 6; i < v.size(); ++i) { minX = std::min(minX, v[i].x); maxX = std::max(maxX, v[i].x); }
+    CHECK(minX >= 97.9f && maxX <= 202.1f);  // width 4 => radius 2 caps
+    // Onion skin on frame 1 shows frame 0 tinted.
+    opt.onion.before = 1;
+    gfx::tessellateFrame(doc, 1, opt, v);
+    bool tinted = false;
+    for (auto& x : v) if (x.r == opt.onion.beforeTint.r && x.a < 1.0f) tinted = true;
+    CHECK(tinted);
+    // Editor zoom scales geometry.
+    opt.onion.before = 0;
+    opt.canvasToScreen = Affine::scale({0.5f, 0.5f});
+    gfx::tessellateFrame(doc, 0, opt, v);
+    maxX = -1e9f;
+    for (size_t i = 6; i < v.size(); ++i) maxX = std::max(maxX, v[i].x);
+    CHECK(maxX <= 101.1f);
+}
+
+TEST(session_editing_flow) {
+    Session s;
+    CHECK(s.rows().size() == 1);
+    CHECK(s.cell(s.currentLayer, 0) == CellState::BlankKey);
+    s.strokeBegin({10, 10}, 0.5f, 0);
+    for (int i = 1; i < 20; ++i) s.strokeAdd({10.0f + i * 3, 10}, 0.7f, i * 0.01);
+    CHECK(s.strokeEnd());
+    CHECK(s.cell(s.currentLayer, 0) == CellState::Key);
+    s.currentFrame = 3;
+    CHECK(s.insertFrame());                       // hold to frame 3
+    CHECK(s.cell(s.currentLayer, 2) == CellState::Hold);
+    CHECK(s.insertBlankKeyframe());
+    CHECK(s.cell(s.currentLayer, 3) == CellState::BlankKey);
+    s.currentFrame = 1;
+    CHECK(s.duplicateFrame());
+    CHECK(s.currentFrame == 3);
+    CHECK(s.cell(s.currentLayer, 3) == CellState::Key);
+    CHECK(s.cell(s.currentLayer, 6) == CellState::BlankKey);
+    // Drawing past the end starts a key there.
+    s.currentFrame = 10;
+    s.strokeBegin({0, 0}, 1, 0); s.strokeAdd({5, 5}, 1, 0.1); CHECK(s.strokeEnd());
+    CHECK(s.cell(s.currentLayer, 10) == CellState::Key);
+    CHECK(s.undoLast());
+    CHECK(s.cell(s.currentLayer, 10) == CellState::Empty);
+    // Eraser removes the stroke on frame 0.
+    s.currentFrame = 0;
+    s.tool = Tool::Eraser;
+    s.strokeBegin({30, 10}, 1, 0); s.strokeAdd({31, 10}, 1, 0.1); CHECK(s.strokeEnd());
+    CHECK(s.cell(s.currentLayer, 0) == CellState::BlankKey);
+    CHECK(s.undoLast());
+    CHECK(s.cell(s.currentLayer, 0) == CellState::Key);
+    // Folders and ordering.
+    LayerId first = s.currentLayer;
+    LayerId folder = s.addLayer(LayerKind::Folder);
+    LayerId inner = s.addLayer(LayerKind::Vector);
+    auto rows = s.rows();
+    CHECK(rows.size() == 3 && rows[0].id == folder && rows[1].id == inner && rows[1].depth == 1 && rows[2].id == first);
+    CHECK(s.moveLayer(folder, -1));
+    CHECK(s.rows().front().id == first);
+    CHECK(s.undoLast());                       // undo move
+    CHECK(s.rows().front().id == folder);
+    CHECK(s.undoLast());                       // undo add inner
+    CHECK(s.rows().size() == 2);
+    CHECK(s.doc.timeline.find(s.currentLayer) && s.currentLayer != inner);
+    CHECK(s.redoLast());
+    CHECK(s.rows().size() == 3);
+    // Palette change is undoable.
+    CHECK(s.setStyleColor(s.currentStyle, {1, 0, 0, 1}));
+    CHECK(s.doc.palette.resolve(s.currentStyle) == (Color{1, 0, 0, 1}));
+    CHECK(s.undoLast());
+    CHECK(s.doc.palette.resolve(s.currentStyle) == Color::black());
+    // Locked layers refuse edits.
+    s.currentLayer = first;
+    s.setLocked(first, true);
+    CHECK(!s.insertKeyframe());
+}
+
+TEST(c_api_roundtrip) {
+    CbxSession* s = cbx_session_new();
+    CHECK(s);
+    CHECK(cbx_layer_count(s) == 1);
+    cbx_stroke_begin(s, 5, 5, 1, 0);
+    cbx_stroke_add(s, 50, 50, 1, 0.1);
+    CHECK(cbx_stroke_end(s));
+    cbx_set_current_frame(s, 4);
+    CHECK(cbx_insert_frame(s));
+    CHECK(cbx_frame_count(s) == 5);
+    uint8_t states[6];
+    cbx_row_states(s, cbx_current_layer(s), 6, states);
+    CHECK(states[0] == CBX_CELL_KEY && states[4] == CBX_CELL_HOLD && states[5] == CBX_CELL_EMPTY);
+    CbxAffine id{1, 0, 0, 1, 0, 0};
+    CHECK(cbx_tessellate(s, 0, id, false, true) > 0);
+    CHECK(cbx_vertices(s) != nullptr);
+    CbxSettings st = cbx_get_settings(s);
+    st.canvasWidth = 4096; st.fps = 12;
+    cbx_set_settings(s, st);
+
+    const int n = cbx_save_begin(s);
+    CHECK(n >= 2);
+    CbxSession* t = cbx_session_new();
+    cbx_load_begin(t);
+    for (int i = 0; i < n; ++i) {
+        size_t len = 0;
+        const uint8_t* data = cbx_save_data(s, i, &len);
+        cbx_load_add(t, cbx_save_path(s, i), data, len);
+    }
+    cbx_save_end(s);
+    CHECK(cbx_load_finish(t));
+    CHECK(cbx_get_settings(t).canvasWidth == 4096);
+    CHECK(cbx_frame_count(t) == 5);
+    cbx_row_states(t, cbx_current_layer(t), 6, states);
+    CHECK(states[0] == CBX_CELL_KEY);
+    cbx_load_begin(t);
+    CHECK(!cbx_load_finish(t));
+    CHECK(std::string(cbx_last_error(t)).size() > 0);
+    cbx_session_free(s);
+    cbx_session_free(t);
 }
 
 int main() {

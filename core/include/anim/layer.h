@@ -5,6 +5,8 @@
 // (vector/raster layers), a SymbolInstance (symbol layers) or a child cel
 // (Clip Studio-style animation folders). Blank keyframe = key with no content.
 #pragma once
+#include <algorithm>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -156,6 +158,7 @@ public:
     bool move(LayerId id, LayerId newParent, int index = -1);  // reparent (drag into folder)
 
     int length() const { return root_->contentLength(); }
+    void replaceRoot(std::unique_ptr<Layer> root) { root_ = std::move(root); }
 
 private:
     std::unique_ptr<Layer> root_;

@@ -1,4 +1,6 @@
 build/
+apps/ipad/Celbox.xcodeproj/
+DerivedData/
 .DS_Store
 *.xcuserstate
 xcuserdata/

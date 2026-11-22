@@ -43,6 +43,12 @@ public:
         s->color = c;
         return true;
     }
+    void restore(Style s) { styles_.push_back(std::move(s)); }  // used by loading
+    bool remove(StyleId id) {
+        auto n = styles_.size();
+        std::erase_if(styles_, [&](const Style& s) { return s.id == id; });
+        return styles_.size() != n;
+    }
     Color resolve(StyleId id) const { auto* s = find(id); return s ? s->color : Color::black(); }
     const std::vector<Style>& styles() const { return styles_; }
 
